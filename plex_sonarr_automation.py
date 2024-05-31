@@ -1,7 +1,6 @@
 #!/usr/bin/python
 
 import os
-import sys
 from plexapi.server import PlexServer
 from pyarr import SonarrAPI
 import os
@@ -40,6 +39,7 @@ plex_url = get_env_variable('PLEX_URL', 'Please enter your Plex URL')
 plex_token = get_env_variable('PLEX_TOKEN', 'Please enter your Plex Token (Refer to https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/ for help finding)')
 sonarr_url = get_env_variable('SONARR_URL', 'Please enter your Sonarr URL')
 sonarr_key = get_env_variable('SONARR_KEY', 'Please enter your Sonarr API Key (On Sonarr go to Settings => General)')
+delete_by_default = get_env_variable('DEFAULT_DELETE', 'Do you want episodes to be deleted by default? Answer true or false')
 
 # Validate and prompt for the number of days until deletion
 days_until_deletion = os.getenv('DAYS_TO_DELETE')
@@ -71,8 +71,8 @@ sonarr = SonarrAPI(sonarr_url, sonarr_key)
 payload = {"monitored": False}
 
 episode_dict = {}
-#Get All Unwatched Episodes over 2 days old and add to an nested dictionary in format {Show:[Episodes]}
-for episode in showLibrary.search(unwatched=False,libtype='episode',filters={"lastViewedAt<<":days_until_deletion}):
+#Get All Unwatched Episodes watched after days until deletion and add to an array nested dictionary in the format {Show:[Episodes]}
+for episode in showLibrary.search(unwatched=False,libtype='episode',filters={"lastViewedAt<<":days_until_deletion,"genre=" if delete_by_default == "false" else "genre!=": "Delete" if delete_by_default == "false" else "Keep"}):
     for guid in episode.season().show().guids:
         if 'tvdb' in str(guid):
             tvShowKey = str(guid)[13:-1]
