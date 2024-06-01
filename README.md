@@ -19,7 +19,7 @@ Before using this script, make sure you have the following prerequisites install
    - `PLEX_TOKEN`: Your Plex authentication token (Refer to [Plex Support](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) for help finding)
    - `SONARR_URL`: Your Sonarr server URL
    - `SONARR_KEY`: Your Sonarr API key (You can find it in Sonarr by navigating to Settings => General)
-   - `DEFAULT_DELETE`: Do you want episodes to be deleted by default? Answer `true` or `false`
+   - `DEFAULT_DELETE`: Do you want episodes to be deleted by default? Answer `true` or `false`. If 'false' is not matched exactly then will default to 'true' functionality.
 3. If any of these environment variables are not set, the script will prompt you to enter them when you run it.
 4. Run the script.
 
@@ -31,7 +31,7 @@ Before using this script, make sure you have the following prerequisites install
    - Plex Token
    - Sonarr URL
    - Sonarr API Key
-   - Whether episodes should be deleted by default (`true` or `false`)
+   - Whether episodes should be deleted by default (`true` or `false`). Defaults to 'true' if 'false' is not exactly matched.
    - Number of days until deletion
 3. The script will then proceed to unmonitor and delete watched episodes in Sonarr that match the specified criteria based on the `delete_by_default` option.
 
