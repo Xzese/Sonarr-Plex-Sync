@@ -11,7 +11,6 @@ from pathlib import Path
 env_path = Path('.env')
 
 try:
-
     # Load existing environment variables from the .env file if it exists
     if env_path.exists():
         load_dotenv(env_path)
@@ -87,22 +86,24 @@ try:
     #Unmonitor and Delete all old watched episodes
     for tvshow_id, episode_ids in episode_dict.items():
         sonarr_series = sonarr.get_series(id_=tvshow_id,tvdb=True)[0]
+        sonarr_series_title = sonarr_series['title']
         sonarr_series_id = sonarr_series['id']
         sonarr_episodes = sonarr.get_episode(id_=sonarr_series_id,series=True)
         for episode in sonarr_episodes:
             if episode["tvdbId"] in episode_ids and episode['hasFile'] == True:
                 sonarr.upd_episode(episode['id'],payload)
                 sonarr.del_episode_file(episode['episodeFileId'])
+                print("Unmonitored and Deleted " + sonarr_series_title + " S" + episode['seasonNumber'] + "E" + episode['episodeNumber'])
                 # If episode is last in season then unmonitor season
                 season_stats = next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])
                 if episode['episodeNumber'] == season_stats['statistics']['totalEpisodeCount']:
-                    print(sonarr_series['seasons'][1])
                     next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])['monitored'] = False
-                    print(sonarr_series['seasons'][1])
                     sonarr.upd_series(sonarr_series)
+                    print("Unmonitored " + sonarr_series_title + " Season " + episode['seasonNumber'])
                 
     showLibrary.update()
     showLibrary.emptyTrash()
     print("Completed")
+
 except Exception as error:
     print("Script failed due to " + error)
