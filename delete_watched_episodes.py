@@ -93,17 +93,17 @@ try:
             if episode["tvdbId"] in episode_ids and episode['hasFile'] == True:
                 sonarr.upd_episode(episode['id'],payload)
                 sonarr.del_episode_file(episode['episodeFileId'])
-                print("Unmonitored and Deleted " + sonarr_series_title + " S" + episode['seasonNumber'] + "E" + episode['episodeNumber'])
+                print("Unmonitored and Deleted " + sonarr_series_title + " S" + str(episode['seasonNumber']) + "E" + str(episode['episodeNumber']))
                 # If episode is last in season then unmonitor season
                 season_stats = next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])
                 if episode['episodeNumber'] == season_stats['statistics']['totalEpisodeCount']:
                     next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])['monitored'] = False
                     sonarr.upd_series(sonarr_series)
-                    print("Unmonitored " + sonarr_series_title + " Season " + episode['seasonNumber'])
+                    print("Unmonitored " + sonarr_series_title + " Season " + str(episode['seasonNumber']))
                 
     showLibrary.update()
     showLibrary.emptyTrash()
     print("Completed")
 
 except Exception as error:
-    print("Script failed due to " + error)
+    print("Script failed due to ",error)
