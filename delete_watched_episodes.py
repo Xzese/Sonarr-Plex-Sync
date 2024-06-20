@@ -11,6 +11,9 @@ import time
 
 # Path to the .env file
 env_path = Path('.env')
+# Load existing environment variables from the .env file if it exists
+if env_path.exists():
+    load_dotenv(env_path)
 
 def add_to_log(message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -18,10 +21,6 @@ def add_to_log(message):
         f.write(f'[{timestamp}] {message}\n')
 
 try:
-    # Load existing environment variables from the .env file if it exists
-    if env_path.exists():
-        load_dotenv(env_path)
-
     # Function to prompt the user for input if the environment variable is not set
     def get_env_variable(var_name, prompt):
         value = os.getenv(var_name)
@@ -118,5 +117,4 @@ except Exception as error:
     add_to_log("Script failed due to " + error)
     print("Script failed due to ", error)
 
-while True:
-    time.sleep(86400)
+time.sleep(86400)
