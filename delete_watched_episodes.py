@@ -119,4 +119,4 @@ except Exception as error:
     print("Script failed due to " + error)
 
 while True:
-    time.sleep(600)
+    time.sleep(86400)
