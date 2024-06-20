@@ -6,9 +6,16 @@ from pyarr import SonarrAPI
 import os
 from dotenv import load_dotenv, set_key
 from pathlib import Path
+import datetime
+import time
 
 # Path to the .env file
 env_path = Path('.env')
+
+def add_to_log(message):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(os.getenv('LOG_FILE'), 'a') as f:
+        f.write(f'[{timestamp}] {message}\n')
 
 try:
     # Load existing environment variables from the .env file if it exists
@@ -93,17 +100,23 @@ try:
             if episode["tvdbId"] in episode_ids and episode['hasFile'] == True:
                 sonarr.upd_episode(episode['id'],payload)
                 sonarr.del_episode_file(episode['episodeFileId'])
+                add_to_log("Unmonitored and Deleted " + sonarr_series_title + " S" + episode['seasonNumber'] + "E" + episode['episodeNumber'])
                 print("Unmonitored and Deleted " + sonarr_series_title + " S" + episode['seasonNumber'] + "E" + episode['episodeNumber'])
                 # If episode is last in season then unmonitor season
                 season_stats = next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])
                 if episode['episodeNumber'] == season_stats['statistics']['totalEpisodeCount']:
                     next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])['monitored'] = False
                     sonarr.upd_series(sonarr_series)
+                    add_to_log("Unmonitored " + sonarr_series_title + " Season " + episode['seasonNumber'])
                     print("Unmonitored " + sonarr_series_title + " Season " + episode['seasonNumber'])
                 
     showLibrary.update()
     showLibrary.emptyTrash()
+    add_to_log("Completed")
     print("Completed")
-
 except Exception as error:
+    add_to_log("Script failed due to " + error)
     print("Script failed due to " + error)
+
+while True:
+    time.sleep(600)
