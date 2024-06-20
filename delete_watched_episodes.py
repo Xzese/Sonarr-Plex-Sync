@@ -116,7 +116,7 @@ try:
     print("Completed")
 except Exception as error:
     add_to_log("Script failed due to " + error)
-    print("Script failed due to " + error)
+    print("Script failed due to ", error)
 
 while True:
     time.sleep(86400)
