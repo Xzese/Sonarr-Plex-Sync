@@ -117,4 +117,4 @@ except Exception as error:
     add_to_log("Script failed due to " + error)
     print("Script failed due to ", error)
 
-time.sleep(86400)
+time.sleep(60*60*24)
