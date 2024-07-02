@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python3
 import os
 from plexapi.server import PlexServer
 from pyarr import SonarrAPI
@@ -118,7 +117,7 @@ try:
     print("Deleted All Watched Episodes") if deleted_episode else print("No Episodes to Delete")
 
 except Exception as error:
-    add_to_log("Script failed due to " + error)
+    add_to_log("Script failed due to " + str(error))
     print("Script failed due to ", error)
 
 time.sleep(60*60*24)
