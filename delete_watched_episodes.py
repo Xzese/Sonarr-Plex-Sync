@@ -83,6 +83,8 @@ try:
             if 'tvdb' in str(guid):
                 episode_dict[tvShowKey].append(int(str(guid)[13:-1]))
 
+    deleted_episode = False
+
     #Unmonitor and Delete all old watched episodes
     for tvshow_id, episode_ids in episode_dict.items():
         sonarr_series = sonarr.get_series(id_=tvshow_id,tvdb=True)[0]
@@ -91,6 +93,7 @@ try:
         sonarr_episodes = sonarr.get_episode(id_=sonarr_series_id,series=True)
         for episode in sonarr_episodes:
             if episode["tvdbId"] in episode_ids and episode['hasFile'] == True:
+                deleted_episode = True
                 sonarr.upd_episode(episode['id'],payload)
                 sonarr.del_episode_file(episode['episodeFileId'])
                 print("Unmonitored and Deleted " + sonarr_series_title + " S" + str(episode['seasonNumber']) + "E" + str(episode['episodeNumber']))
@@ -100,10 +103,10 @@ try:
                     next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])['monitored'] = False
                     sonarr.upd_series(sonarr_series)
                     print("Unmonitored " + sonarr_series_title + " Season " + str(episode['seasonNumber']))
-                
+
     showLibrary.update()
     showLibrary.emptyTrash()
-    print("Completed")
+    print("Deleted All Watched Episodes") if deleted_episode else print("No Episodes to Delete")
 
 except Exception as error:
     print("Script failed due to ",error)
