@@ -23,6 +23,8 @@ Before using this script, make sure you have the following prerequisites install
    - `DAYS_TO_DELETE`: Number of days until episodes are deleted (default: 2)
    - `DEFAULT_DELETE`: Delete episodes by default? Answer `true` or `false`. If not `false`, defaults to `true`
    - `LOG_FILE`: Path to the log file (default: output/log.txt)
+   - `LOG_LEVEL`: Log level (default: INFO)
+   - `LOG_RETENTION_WEEKS`: Number of weekly rotated logs to keep (default: 4)
    - `MEDIA_SERVICE`: Choose `plex` or `jellyfin` (default: plex)
    
    **For Plex:**
@@ -75,7 +77,8 @@ Episodes are automatically identified as watched in Jellyfin and deleted based o
 
 ## Logging
 
-The script logs all actions to the file specified in the `LOG_FILE` environment variable. Each log entry includes a timestamp and a description of the action performed (episode deletion, season unmonitoring, etc.). If no episodes are found to delete, this is also logged.
+The script logs all actions to the file specified in the `LOG_FILE` environment variable using weekly rotation (`W0`, Monday midnight) and retains `LOG_RETENTION_WEEKS` backups.  
+Each log entry includes a timestamp and a description of the action performed (episode deletion, season unmonitoring, etc.). If no episodes are found to delete, this is also logged.
 
 ## Scheduling
 

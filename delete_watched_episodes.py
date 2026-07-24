@@ -5,13 +5,36 @@ from jellyfin_apiclient_python import JellyfinClient
 from pyarr import SonarrAPI
 from dotenv import load_dotenv
 import datetime
+import sys
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 load_dotenv()
 
+LOG_FILE = os.getenv("LOG_FILE", "output/log.txt")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_RETENTION_WEEKS = int(os.getenv("LOG_RETENTION_WEEKS", "4"))
+
+# Configure file rotation for logs.
+os.makedirs(os.path.dirname(LOG_FILE) or ".", exist_ok=True)
+log_handler = TimedRotatingFileHandler(
+    LOG_FILE,
+    when="W0",
+    interval=1,
+    atTime=datetime.time(0, 0),
+    backupCount=max(0, LOG_RETENTION_WEEKS),
+    encoding="utf-8",
+)
+log_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
+
+logger = logging.getLogger("sonarr_delete_watched_episodes")
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+logger.addHandler(log_handler)
+logger.propagate = False
+
+
 def add_to_log(message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(os.getenv('LOG_FILE'), 'a') as f:
-        f.write(f'[{timestamp}] {message}\n')
+    logger.info(message)
 
 def get_last_played_date(user_data):
     """
@@ -36,10 +59,38 @@ def get_last_played_date(user_data):
     except (TypeError, ValueError):
         return None
 
+def require_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise ValueError(f"Missing required environment variable: {name}")
+    return value
+
+
+def normalize_tvdb_id(raw_id):
+    """
+    Normalize TVDB IDs extracted from providers.
+    Returns None for missing/empty/null values that would break API requests.
+    """
+    if raw_id is None:
+        return None
+
+    if isinstance(raw_id, str):
+        value = raw_id.strip()
+    else:
+        value = str(raw_id).strip()
+
+    if not value:
+        return None
+    if value.lower() in {"none", "null", "nan"}:
+        return None
+    return value
+
 try:
     # Check and prompt for necessary environment variables
-    sonarr_url = os.getenv('SONARR_URL')
-    sonarr_key = os.getenv('SONARR_KEY')
+    sonarr_url = require_env('SONARR_URL')
+    sonarr_key = require_env('SONARR_KEY')
+    if not sonarr_url.startswith(('http://', 'https://')):
+        raise ValueError("SONARR_URL must include a scheme, e.g. https://your.sonarr:8989")
     delete_by_default = os.getenv('DEFAULT_DELETE')
 
     # Validate and prompt for the number of days until deletion
@@ -58,12 +109,16 @@ try:
         days_until_deletion = 2
 
     episode_dict = {}
+    invalid_ids = set()
+    series_name_by_tvdb = {}
 
-    media_service = os.getenv('MEDIA_SERVICE', 'Plex')
+    media_service = (os.getenv('MEDIA_SERVICE', 'plex') or 'plex').lower()
     match media_service:
         case 'plex':
             plex_url = os.getenv('PLEX_URL')
             plex_token = os.getenv('PLEX_TOKEN')
+            if not plex_url or not plex_token:
+                raise ValueError("PLEX_URL and PLEX_TOKEN are required when MEDIA_SERVICE=plex")
 
             # Add 'd' to days_until_deletion
             days_until_deletion = str(days_until_deletion) + "d"
@@ -74,18 +129,36 @@ try:
             
             #Get All Unwatched Episodes watched after days until deletion and add to an array nested dictionary in the format {Show:[Episodes]}
             for episode in showLibrary.search(unwatched=False,libtype='episode',filters={"lastViewedAt<<":days_until_deletion,"genre=" if delete_by_default == "false" else "genre!=": "Delete" if delete_by_default == "false" else "Keep"}):
-                for guid in episode.season().show().guids:
+                show = episode.season().show()
+                show_title = getattr(show, "title", "unknown series")
+                tvShowKey = None
+                for guid in show.guids:
                     if 'tvdb' in str(guid):
-                        tvShowKey = str(guid)[13:-1]
+                        tvShowKey = normalize_tvdb_id(str(guid)[13:-1])
+                if not tvShowKey:
+                    invalid_ids.add("plex-series")
+                    add_to_log(f"Skipping episode missing series tvdb id: '{episode.title}' from series '{show_title}'")
+                    continue
+                series_name_by_tvdb[tvShowKey] = show_title
                 if tvShowKey not in episode_dict:
                     episode_dict[tvShowKey] = []
+                ep_tvdb_id = None
                 for guid in episode.guids:
                     if 'tvdb' in str(guid):
-                        episode_dict[tvShowKey].append(str(guid)[13:-1])
+                        ep_tvdb_id = normalize_tvdb_id(str(guid)[13:-1])
+                if ep_tvdb_id:
+                    episode_dict[tvShowKey].append(ep_tvdb_id)
+                else:
+                    invalid_ids.add(f"plex-episode/{tvShowKey}")
+                    add_to_log(
+                        f"Skipping episode missing episode tvdb id: '{episode.title}' in series '{show_title}' (series tvdb id {tvShowKey})"
+                    )
         
         case "jellyfin":
             jellyfin_url = os.getenv('JELLYFIN_URL')
             jellyfin_token = os.getenv('JELLYFIN_TOKEN')
+            if not jellyfin_url or not jellyfin_token:
+                raise ValueError("JELLYFIN_URL and JELLYFIN_TOKEN are required when MEDIA_SERVICE=jellyfin")
 
             client = JellyfinClient()
             client.config.data["auth.ssl"] = True
@@ -131,22 +204,36 @@ try:
             
             
             filtered_watched_episodes = {}
+            filtered_watched_series_names = {}
             for ep in watched_episodes:
-                series_id = ep.get("SeriesId")
-                tvdb_id = ep.get("ProviderIds", {}).get("Tvdb")
+                series_id = normalize_tvdb_id(ep.get("SeriesId"))
+                tvdb_id = normalize_tvdb_id(ep.get("ProviderIds", {}).get("Tvdb"))
+                episode_name = ep.get("Name") or ep.get("name") or "unknown episode"
+                series_name = ep.get("SeriesName") or ep.get("Series") or "unknown series"
                 user_data = ep.get("UserData", {})
                 last_played_date = get_last_played_date(user_data)
+                if not series_id:
+                    invalid_ids.add("jellyfin-series")
+                    add_to_log(f"Skipping episode missing series tvdb id: '{episode_name}' in series '{series_name}'")
+                    continue
+                if not tvdb_id:
+                    invalid_ids.add(f"jellyfin-episode/{series_id}")
+                    add_to_log(f"Skipping episode missing episode tvdb id: '{episode_name}' in series '{series_name}'")
+                    continue
                 if (
                     series_id
                     and series_id not in favourite_series
-                    and tvdb_id
                     and user_data.get("Played") is True
                     and last_played_date
                     and last_played_date < (datetime.datetime.today() - datetime.timedelta(days=days_until_deletion)).date()
                 ):
-                    if series_id not in filtered_watched_episodes:
-                        filtered_watched_episodes[series_id] = []
-                    filtered_watched_episodes[series_id].append(tvdb_id)
+                    if series_id:
+                        if series_id not in filtered_watched_episodes:
+                            filtered_watched_episodes[series_id] = []
+                            filtered_watched_series_names[series_id] = series_name
+                        filtered_watched_episodes[series_id].append(tvdb_id)
+                    else:
+                        invalid_ids.add("jellyfin-series")
 
             series_ids = ",".join(series_id for series_id in filtered_watched_episodes.keys() if series_id)
             if not series_ids:
@@ -163,15 +250,21 @@ try:
             if series_ids:
                 series_query = client.jellyfin._get(f"Users/{user_id}/Items", params=params)
                 series_tvdb_map = {
-                    item["Id"]: item.get("ProviderIds", {}).get("Tvdb")
+                    normalize_tvdb_id(item["Id"]): normalize_tvdb_id(item.get("ProviderIds", {}).get("Tvdb"))
                     for item in series_query["Items"]
-                    if item.get("Id") and item.get("ProviderIds", {}).get("Tvdb")
+                    if normalize_tvdb_id(item.get("Id")) and normalize_tvdb_id(item.get("ProviderIds", {}).get("Tvdb"))
                 }
 
             for key, value in filtered_watched_episodes.items():
                 tvdb_series_id = series_tvdb_map.get(key)
                 if tvdb_series_id:
                     episode_dict[tvdb_series_id] = value
+                    series_name_by_tvdb[tvdb_series_id] = filtered_watched_series_names.get(key, "unknown series")
+                else:
+                    invalid_ids.add(f"mapped-series/{key}")
+                    add_to_log(
+                        f"Skipping mapped series '{filtered_watched_series_names.get(key, 'unknown series')}' (series id {key}) because tvdb mapping is missing"
+                    )
 
     deleted_episode = False
     
@@ -180,6 +273,12 @@ try:
 
     #Unmonitor and Delete all old watched episodes
     for tvshow_id, episode_ids in episode_dict.items():
+        tvshow_id = normalize_tvdb_id(tvshow_id)
+        if not tvshow_id:
+            add_to_log(f"Skipping episode cleanup for invalid series id: {tvshow_id}")
+            continue
+        if not episode_ids:
+            continue
         sonarr_series = sonarr.get_series(id_=tvshow_id,tvdb=True)[0]
         sonarr_series_title = sonarr_series['title']
         sonarr_series_id = sonarr_series['id']
@@ -210,6 +309,16 @@ try:
     print("Deleted All Watched Episodes") if deleted_episode else print("No Episodes to Delete")
 
 except Exception as error:
-    add_to_log("Script failed due to " + str(error))
-    print("Script failed due to ", error)
-
+    # Surface a concise, actionable reason for failures involving URL/id construction.
+    if "Id': 'None'" in str(error):
+        message = (
+            "Script failed due to an invalid Sonarr request id (None). "
+            f"Invalid IDs observed during filtering: {', '.join(sorted(invalid_ids)) if invalid_ids else 'none'}."
+        )
+    elif "MissingSchema" in str(error.__class__.__name__) or "MissingSchema" in str(error):
+        message = f"Script failed during Sonarr request construction. Raw error: {error}"
+    else:
+        message = str(error)
+    add_to_log("Script failed due to " + message)
+    print("Script failed due to ", message)
+    sys.exit(1)

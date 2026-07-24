@@ -5,13 +5,33 @@ from jellyfin_apiclient_python import JellyfinClient
 from pyarr import SonarrAPI
 from dotenv import load_dotenv
 import datetime
+import logging
+from logging.handlers import TimedRotatingFileHandler
 
 load_dotenv()
 
+LOG_FILE = os.getenv("LOG_FILE", "output/log.txt")
+LOG_RETENTION_WEEKS = int(os.getenv("LOG_RETENTION_WEEKS", "4"))
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+os.makedirs(os.path.dirname(LOG_FILE) or ".", exist_ok=True)
+log_handler = TimedRotatingFileHandler(
+    LOG_FILE,
+    when="W0",
+    interval=1,
+    atTime=datetime.time(0, 0),
+    backupCount=max(0, LOG_RETENTION_WEEKS),
+    encoding="utf-8",
+)
+log_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
+
+logger = logging.getLogger("sonarr_delete_watched_episodes_test")
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+logger.addHandler(log_handler)
+logger.propagate = False
+
 def add_to_log(message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(os.getenv('LOG_FILE'), 'a') as f:
-        f.write(f'[{timestamp}] {message}\n')
+    logger.info(message)
 
 try:
     # Check and prompt for necessary environment variables
@@ -107,4 +127,3 @@ try:
 
 except Exception as error:
     print("Script failed due to ", error)
-
