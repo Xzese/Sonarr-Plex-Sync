@@ -85,6 +85,9 @@ def normalize_tvdb_id(raw_id):
         return None
     return value
 
+invalid_ids = set()
+operation_context = "startup"
+
 try:
     # Check and prompt for necessary environment variables
     sonarr_url = require_env('SONARR_URL')
@@ -109,7 +112,6 @@ try:
         days_until_deletion = 2
 
     episode_dict = {}
-    invalid_ids = set()
     series_name_by_tvdb = {}
 
     media_service = (os.getenv('MEDIA_SERVICE', 'plex') or 'plex').lower()
@@ -155,16 +157,21 @@ try:
                     )
         
         case "jellyfin":
-            jellyfin_url = os.getenv('JELLYFIN_URL')
+            jellyfin_url = (os.getenv('JELLYFIN_URL') or '').rstrip('/')
             jellyfin_token = os.getenv('JELLYFIN_TOKEN')
             if not jellyfin_url or not jellyfin_token:
                 raise ValueError("JELLYFIN_URL and JELLYFIN_TOKEN are required when MEDIA_SERVICE=jellyfin")
 
             client = JellyfinClient()
-            client.config.data["auth.ssl"] = True
+            client.config.data["auth.ssl"] = jellyfin_url.lower().startswith("https://")
             client.config.data["app.name"] = 'sonarr_sync_app'
             client.config.data["app.version"] = '0.0.1'
+            operation_context = f"authenticating with Jellyfin at {jellyfin_url}"
             client.authenticate({"Servers": [{"AccessToken": jellyfin_token, "address": jellyfin_url}]}, discover=False)
+            if not client.config.data.get("auth.server"):
+                raise ConnectionError(
+                    f"Jellyfin rejected the configured URL or API key for {jellyfin_url}"
+                )
             
             params={
                 "recursive": "true",
@@ -274,51 +281,92 @@ try:
     #Unmonitor and Delete all old watched episodes
     for tvshow_id, episode_ids in episode_dict.items():
         tvshow_id = normalize_tvdb_id(tvshow_id)
+        media_series_title = series_name_by_tvdb.get(tvshow_id, "unknown series")
         if not tvshow_id:
             add_to_log(f"Skipping episode cleanup for invalid series id: {tvshow_id}")
             continue
         if not episode_ids:
             continue
-        sonarr_series = sonarr.get_series(id_=tvshow_id,tvdb=True)[0]
-        sonarr_series_title = sonarr_series['title']
-        sonarr_series_id = sonarr_series['id']
+        operation_context = f"looking up Sonarr series '{media_series_title}' (TVDB id {tvshow_id})"
+        sonarr_series_results = sonarr.get_series(id_=tvshow_id,tvdb=True)
+        if not sonarr_series_results:
+            add_to_log(
+                f"Skipping series '{media_series_title}' because Sonarr has no match for TVDB id {tvshow_id}"
+            )
+            continue
+        sonarr_series = sonarr_series_results[0]
+        sonarr_series_title = sonarr_series.get('title') or media_series_title
+        sonarr_series_id = sonarr_series.get('id')
+        if sonarr_series_id in (None, "", "None", 0, "0"):
+            invalid_ids.add(f"sonarr-series/{tvshow_id}")
+            add_to_log(
+                f"Skipping series '{sonarr_series_title}' (TVDB id {tvshow_id}) because its Sonarr series id is missing"
+            )
+            continue
+        operation_context = f"looking up episodes for Sonarr series '{sonarr_series_title}' (id {sonarr_series_id})"
         sonarr_episodes = sonarr.get_episode(id_=sonarr_series_id,series=True)
         for episode in sonarr_episodes:
-            if str(episode["tvdbId"]) in episode_ids and episode['hasFile'] == True:
+            if str(episode.get("tvdbId")) in episode_ids and episode.get('hasFile') is True:
+                sonarr_episode_id = episode.get('id')
+                episode_title = episode.get('title') or 'unknown episode'
+                season_number = episode.get('seasonNumber', 'unknown')
+                episode_number = episode.get('episodeNumber', 'unknown')
+                if sonarr_episode_id in (None, "", "None", 0, "0"):
+                    invalid_ids.add(f"sonarr-episode/{tvshow_id}")
+                    add_to_log(
+                        f"Skipping '{episode_title}' from series '{sonarr_series_title}' "
+                        f"(S{season_number}E{episode_number}) because its Sonarr episode id is missing"
+                    )
+                    continue
+                episode_file_id = episode.get('episodeFileId')
+                if episode_file_id in (None, "", "None", 0, "0"):
+                    invalid_ids.add(f"sonarr-episode-file/{sonarr_episode_id}")
+                    add_to_log(
+                        f"Skipping '{episode_title}' from series '{sonarr_series_title}' "
+                        f"(S{season_number}E{episode_number}, Sonarr episode id {sonarr_episode_id}) "
+                        "because Sonarr reported hasFile=true but episodeFileId is missing"
+                    )
+                    continue
+                operation_context = (
+                    f"unmonitoring '{episode_title}' from '{sonarr_series_title}' "
+                    f"(S{season_number}E{episode_number}, Sonarr episode id {sonarr_episode_id})"
+                )
+                sonarr.upd_episode(sonarr_episode_id,payload)
+                operation_context = (
+                    f"deleting the file for '{episode_title}' from '{sonarr_series_title}' "
+                    f"(S{season_number}E{episode_number}, episode file id {episode_file_id})"
+                )
+                sonarr.del_episode_file(episode_file_id)
                 deleted_episode = True
-                sonarr.upd_episode(episode['id'],payload)
-                sonarr.del_episode_file(episode['episodeFileId'])
                 add_to_log("Unmonitored and Deleted " + sonarr_series_title + " S" + str(episode['seasonNumber']) + "E" + str(episode['episodeNumber']))
                 print("Unmonitored and Deleted " + sonarr_series_title + " S" + str(episode['seasonNumber']) + "E" + str(episode['episodeNumber']))
                 # If episode is last in season then unmonitor season
                 season_stats = next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])
                 if episode['episodeNumber'] == season_stats['statistics']['totalEpisodeCount']:
                     next(i for i in sonarr_series['seasons'] if i['seasonNumber'] == episode['seasonNumber'])['monitored'] = False
+                    operation_context = f"unmonitoring season {episode['seasonNumber']} of '{sonarr_series_title}'"
                     sonarr.upd_series(sonarr_series)
                     add_to_log("Unmonitored " + sonarr_series_title + " Season " + str(episode['seasonNumber']))
                     print("Unmonitored " + sonarr_series_title + " Season " + str(episode['seasonNumber']))
 
     match media_service:
-        case 'plex':            
+        case 'plex':
+            operation_context = "refreshing the Plex TV library"
             showLibrary.update()
             showLibrary.emptyTrash()
         case 'jellyfin':
+            operation_context = "refreshing the Jellyfin library"
             client.jellyfin.refresh_library()
 
     add_to_log("Deleted All Watched Episodes") if deleted_episode else add_to_log(f"No Episodes to Delete from {media_service}")
     print("Deleted All Watched Episodes") if deleted_episode else print("No Episodes to Delete")
 
 except Exception as error:
-    # Surface a concise, actionable reason for failures involving URL/id construction.
-    if "Id': 'None'" in str(error):
-        message = (
-            "Script failed due to an invalid Sonarr request id (None). "
-            f"Invalid IDs observed during filtering: {', '.join(sorted(invalid_ids)) if invalid_ids else 'none'}."
-        )
-    elif "MissingSchema" in str(error.__class__.__name__) or "MissingSchema" in str(error):
-        message = f"Script failed during Sonarr request construction. Raw error: {error}"
-    else:
-        message = str(error)
-    add_to_log("Script failed due to " + message)
-    print("Script failed due to ", message)
+    message = (
+        f"Script failed while {operation_context}: "
+        f"{type(error).__name__}: {error!r}. "
+        f"Invalid IDs observed: {', '.join(sorted(invalid_ids)) if invalid_ids else 'none'}."
+    )
+    logger.exception(message)
+    print(message)
     sys.exit(1)
