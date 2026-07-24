@@ -34,8 +34,6 @@ Before using this script, make sure you have the following prerequisites install
    - `JELLYFIN_TOKEN`: Your Jellyfin API token
    
    **Optional:**
-   - `SHOULD_SLEEP`: Whether to sleep after execution (default: false)
-   - `SLEEP_HOURS`: Number of hours to sleep if SHOULD_SLEEP is true (default: 24)
 
 3. Run the script.
 
@@ -57,7 +55,7 @@ The script also supports Jellyfin libraries. Episodes are identified and filtere
    - Find watched episodes older than the specified number of days
    - Unmonitor and delete those episodes from Sonarr
    - Log all actions to the specified LOG_FILE
-   - Optionally sleep for the specified duration if SHOULD_SLEEP is enabled
+   - Schedule repeated runs via cron/systemd or your orchestrator of choice
 
 ### Adding Shows to Delete or Keep Lists
 
@@ -81,4 +79,4 @@ The script logs all actions to the file specified in the `LOG_FILE` environment 
 
 ## Scheduling
 
-If you want to run this script automatically at regular intervals, you can set `SHOULD_SLEEP` to `true` and `SLEEP_HOURS` to your desired interval. The script will sleep for the specified number of hours after completing its tasks.
+Use cron, a service manager (systemd), or a container/job scheduler to run this script at the interval you need.

@@ -5,7 +5,6 @@ from jellyfin_apiclient_python import JellyfinClient
 from pyarr import SonarrAPI
 from dotenv import load_dotenv
 import datetime
-import time
 
 load_dotenv()
 
@@ -109,8 +108,3 @@ try:
 except Exception as error:
     print("Script failed due to ", error)
 
-
-should_sleep = (os.getenv("SHOULD_SLEEP", "false").lower()) == "true"
-sleep_hours = int(os.getenv("SLEEP_HOURS", 24))
-if should_sleep:
-    time.sleep(60*60*sleep_hours)
